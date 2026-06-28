@@ -96,7 +96,6 @@ while pyforge.is_open():
     if btn_x <= mx <= (btn_x + btn_w) and btn_y <= my <= (btn_y + btn_h):
         btn_color = (0.1, 0.6, 0.3)
         if pyforge.is_button_clicked(btn_x, btn_y, btn_w, btn_h):
-            # Play a short audio file effect if available, or trigger particles
             if os.path.exists("point.wav"): pyforge.play_sound("point.wav")
             pyforge.spawn_particles(mx, my, color=(0.4, 0.7, 1.0))
     else:
