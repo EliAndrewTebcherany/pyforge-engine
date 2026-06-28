@@ -1,0 +1,34 @@
+# Python Caches & Compiled bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Local Virtual Environments Sandbox
+.venv/
+venv/
+ENV/
+env/
+
+# Build and Packaging Artifacts (Pip Central Distros)
+build/
+dist/
+downloads/
+*.egg-info/
+.eggs/
+
+# Compiled Native C Binaries (Framework Shared Objects)
+src/*.o
+pyforge/*.so
+*.so
+*.out
+*.app
+
+# Temporary Runtime Streams & Audio Assets
+temp_music_stream.wav
+font.png
+
+# Operating System Hidden Files
+.DS_Store
+Thumbs.db
