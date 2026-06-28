@@ -9,7 +9,7 @@ pyforge_backend = Extension(
 )
 
 setup(
-    name="Pyforge",
+    name="pyforge-engine",
     version="0.2.0",
     author="Eli Andrew Tebcherany",
     packages=find_packages(),
