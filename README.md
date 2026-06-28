@@ -75,7 +75,7 @@ import pyforge
 import os
 
 pyforge.init(1024, 768, "Pyforge Engine - Audio-Visual Sandbox")
-pyforge.load_system_font("sans-serif", size=24)
+pyforge.load_system_font("sans-serif", font_size=24)
 
 # Stream background music file (WAV or MP3 handled filelessly in memory!)
 if os.path.exists("my_music.mp3"):
