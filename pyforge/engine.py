@@ -89,12 +89,68 @@ def update_effects():
     pyforge_core.update_and_render_particles()
 
 def shape(sides):
+    raw_vertices = pyforge_core.shape(sides)
+    return EngineShape(raw_vertices)
+
     return pyforge_core.shape(sides)
 
 def drawshape(shape_obj, x, y, size, angle=0.0, color=(1.0, 1.0, 1.0), opacity=1.0, texture=None):
     r, g, b = color
     tex_id = texture.id if texture is not None else 0
-    pyforge_core.drawshape(shape_obj, float(x), float(y), float(size), float(angle), float(r), float(g), float(b), float(opacity), int(tex_id))
+    
+    render_x = float(x)
+    render_y = float(y)
+
+    # 🔄 THE BIG SELF-CONTAINED PHYSICS INTERCEPT ARRAY
+    if hasattr(shape_obj, 'physics_enabled') and shape_obj.physics_enabled:
+        # Initialize internal dynamic variables once on the very first frame step run
+        if shape_obj.current_x is None:
+            shape_obj.current_x = float(x)
+        if shape_obj.current_y is None:
+            shape_obj.current_y = float(y)
+
+        dt = 0.004           # Slower time slice for fluid visualization
+        SCREEN_TOP = 68.0    # Lower edge of your gray line block barrier
+        SCREEN_BOTTOM = 745.0 # Upper edge of your bottom safety line margin
+        RADIUS = 15.0        # Boundary buffer offset
+
+        # 🚪 STEP A: CONTINUOUS ACCELERATION (GRAVITY) & FRICTION
+        shape_obj.velocity += shape_obj.gravity * dt
+        
+        # Apply air resistance damping directly to velocity vector components
+        friction_coefficient = 0.998
+        shape_obj.velocity *= friction_coefficient
+
+        # Move the coordinates instantly
+        shape_obj.current_y += shape_obj.velocity * dt
+
+        # 🚪 STEP B: SCREEN EDGE WALL BOUNDARY REFLECTIONS
+        if shape_obj.current_y - RADIUS <= SCREEN_TOP and shape_obj.velocity < 0:
+            shape_obj.velocity = -shape_obj.velocity * 0.8  # Reverse down
+            shape_obj.current_y = SCREEN_TOP + RADIUS
+        elif shape_obj.current_y + RADIUS >= SCREEN_BOTTOM and shape_obj.velocity > 0:
+            shape_obj.velocity = -shape_obj.velocity * 0.8  # Bounce up!
+            shape_obj.current_y = SCREEN_BOTTOM - RADIUS
+
+        # Force the engine to pass the calculated internal variables to your C core!
+        render_x = float(shape_obj.current_x)
+        render_y = float(shape_obj.current_y)
+
+    mesh_data = shape_obj.raw_vertices if hasattr(shape_obj, 'raw_vertices') else shape_obj
+
+    pyforge_core.drawshape(
+        mesh_data, 
+        render_x, 
+        render_y, 
+        float(size), 
+        float(angle), 
+        float(r), 
+        float(g), 
+        float(b), 
+        float(opacity), 
+        int(tex_id)
+    )
+
 
 def clear_gradient(top_color=(0.0, 0.0, 0.0), bottom_color=(0.0, 0.0, 0.0)):
     r1, g1, b1 = top_color
@@ -276,3 +332,36 @@ def get_fps():
         _fps_last_time = current_time
 
     return int(_fps_current_display)
+
+
+class EngineShape:
+    def __init__(self, raw_vertices):
+        self.raw_vertices = raw_vertices
+        
+        # Automated Opt-In Subsystem Flags
+        self.physics_enabled = False
+        self.gravity = 0.0
+        self.mass = 1.0
+        self.velocity = 0.0
+        self.current_y = None  # Internal location cache tracker
+        self.current_x = None  # FIXED: Added missing horizontal variable tracker!
+
+
+    def get_physics(self, mode="realistic"):
+        """Activates automatic framework gravity math calculations."""
+        self.physics_enabled = True
+        if mode == "realistic":
+            self.gravity = 10.0
+            self.mass = 10.0
+            self.velocity = 0.0
+        elif mode == "custom":
+            self.gravity = 0.0
+            self.mass = 1.0
+            self.velocity = 0.0
+
+    # These magic methods let your existing C code interact with it like a raw list!
+    def __getitem__(self, item):
+        return self.raw_vertices[item]
+
+    def __len__(self):
+        return len(self.raw_vertices)
