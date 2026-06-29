@@ -1,8 +1,8 @@
-# 🛠️ pyforge-engine (v1.0.0)
+# 🛠️ pyforge-engine (v0.2.0)
 
 A blazing-fast, cross-platform 2D game engine framework combining a low-level compiled **C/OpenGL core** with a clean, high-utility **Python API**.
 
-Unlike software-rendered libraries like Pygame which process graphics sequentially on individual CPU threads, `pyforge-engine` processes matrix math directly within hardware-accelerated **GPU layers**. Version 1.0.0 introduces a modular, opt-in **Vector Physics Subsystem**, enabling smooth linear momentum tracking, elastic object-to-object collisions, and dynamic screen boundary containment without sacrificing performance.
+Unlike software-rendered libraries like Pygame which process graphics sequentially on individual CPU threads, `pyforge-engine` processes matrix math directly within hardware-accelerated **GPU layers**. Version 0.2.0 introduces a modular, opt-in **Vector Physics Subsystem**, enabling smooth linear momentum tracking, elastic object-to-object collisions, and dynamic screen boundary containment without sacrificing performance.
 
 ---
 
@@ -85,7 +85,7 @@ while pyforge.is_open():
 ```
 
 ### Test 2: Head-On Kinetic Interactions & Vector Matrix
-**[UPDATED v1.0.0]** Sets up a high-precision head-on collision matrix demonstrating Newton's Third Law (Conservation of Linear Momentum), dynamic screen boundaries, and custom particle explosion clouds.
+**[UPDATED v0.2.0]** Sets up a high-precision head-on collision matrix demonstrating Newton's Third Law (Conservation of Linear Momentum), dynamic screen boundaries, and custom particle explosion clouds.
 
 ```python
 import pyforge
@@ -214,4 +214,4 @@ These comments provide explanations of the low-level memory translations, buffer
 
 ---
 
-*pyforge-engine v1.0.0 — Developed by Eli Andrew Tebcherany. Released under the MIT License.*
+*pyforge-engine v0.2.0 — Developed by Eli Andrew Tebcherany. Released under the MIT License.*
