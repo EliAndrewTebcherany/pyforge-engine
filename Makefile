@@ -12,9 +12,9 @@ setup:
 	@if [ ! -d "$(VENV)" ]; then \
 		echo "No environment found. Creating isolated Python Virtual Environment sandbox..."; \
 		$(PYTHON) -m venv $(VENV); \
-		echo "Installing local Pillow library wheel from Downloads..."; \
-		$(BIN)/pip install $(HOME)/Downloads/pillow-12.2.0-cp314-cp314-manylinux*.whl; \
-		echo "Compiling and installing local Pyforge C engine backend..."; \
+		echo "Upgrading base packaging tools..."; \
+		$(BIN)/pip install --upgrade pip setuptools wheel; \
+		echo "Compiling C extensions and installing pyforge-engine with dependencies..."; \
 		$(BIN)/pip install -e .; \
 	else \
 		echo "Environment already exists. Ready to run."; \
