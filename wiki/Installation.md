@@ -2,136 +2,107 @@
 
 This guide will walk you through setting up **pyforge-engine** on your system.
 
-## Prerequisites
+## Standard Installation (Recommended)
 
-Before installing pyforge-engine, ensure you have the following installed:
+Thanks to hardware-accelerated cross-platform binary wheels, you can install **pyforge-engine** instantly without needing a local C compiler (`gcc`), `make`, or setting up manual system dependency headers.
 
-### Required System Libraries
+### Step 1: Create a Virtual Environment (Optional but Recommended)
 
-**On Ubuntu/Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install -y python3-dev libglfw3-dev libglew-dev libopenal-dev libpython3-dev
-```
-
-**On macOS (using Homebrew):**
-```bash
-brew install glfw3 glew openal-soft python3
-```
-
-**On Windows (using vcpkg or pre-built binaries):**
-- Install [Python 3.8+](https://www.python.org/downloads/)
-- Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/) with C++ support
-- Download pre-built GLFW, GLEW, and OpenAL binaries or use package managers like `chocolatey` or `vcpkg`
-
-### Required Python Version
-- Python 3.8 or higher
-
-## Installation Steps
-
-### Step 1: Clone the Repository
+Isolate your project dependencies by creating a virtual environment:
 
 ```bash
-git clone https://github.com/EliAndrewTebcherany/pyforge-engine.git
-cd pyforge-engine
-```
-
-### Step 2: Create a Virtual Environment (Recommended)
-
-Creating a virtual environment isolates your project dependencies:
-
-```bash
+# On Linux / macOS
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
+
+# On Windows
+python -m venv venv
+venv\Scripts\activate
 ```
 
-### Step 3: Install Dependencies
+### Step 2: Install via pip
 
-The Makefile automates the installation process:
+Run a single command to automatically fetch the pre-compiled engine binaries along with all required dependencies (like Pillow):
 
 ```bash
+pip install pyforge-engine
+```
+
+---
+
+## Developer / Source Installation (Alternative)
+
+If you are a contributor looking to modify the core C engine code (`src/core.c`, `src/text.c`, `src/effects.c`) or want to compile the library completely from scratch, follow these instructions.
+
+### 1. Install Required System Libraries
+
+You must have local C compilation tools and the development files for GLFW and OpenAL installed on your host operating system:
+
+*   **Ubuntu/Debian:**
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y python3-dev libglfw3-dev libopenal-dev build-essential
+    ```
+*   **macOS (using Homebrew):**
+    ```bash
+    brew install glfw openal-soft python3
+    ```
+*   **Windows:**
+    *   Install [Python 3.10+](https://python.org)
+    *   Install [Visual Studio Build Tools](https://microsoft.com) with the **Desktop development with C++** workload enabled.
+    *   Use `vcpkg` to manage dependencies or manually configure pre-built Windows binaries for GLFW and OpenAL.
+
+### 2. Clone and Local Compile
+
+```bash
+# Clone the repository
+git clone https://github.com
+cd pyforge-engine
+
+# Build and install locally in editable developer mode using the Makefile
 make
 ```
 
-This command will:
-- Upgrade pip and setuptools
-- Install required Python packages (Pillow for image handling)
-- Compile C extensions with OpenGL and OpenAL support
+---
 
-**Manual Installation Alternative:**
-If you prefer to install manually without the Makefile:
+## Verify Installation
 
-```bash
-pip install --upgrade pip setuptools
-pip install Pillow
-python setup.py build_ext --inplace
-```
-
-### Step 4: Verify Installation
-
-Create a simple test script to verify the installation works:
+Create a simple script named `test_installation.py` to verify the engine initializes and hooks your GPU rendering pipelines correctly:
 
 ```python
 import pyforge
 
+# Initialize a hardware-accelerated window
 pyforge.init(800, 600, "PyForge Installation Test")
 print("✓ PyForge Engine initialized successfully!")
 
 while pyforge.is_open():
+    # Render loop using your custom GPU gradient clears
     pyforge.clear_gradient((0.1, 0.1, 0.1), (0.2, 0.2, 0.2))
     pyforge.refresh()
 ```
 
-Run it with:
+Run your test script:
 ```bash
 python test_installation.py
 ```
 
-If a window opens successfully, your installation is complete!
+If a clean, hardware-accelerated window pops open on your desktop, your setup is complete!
 
 ---
 
 ## Troubleshooting
 
 ### Issue: "ModuleNotFoundError: No module named 'pyforge'"
-
-**Solution:** Ensure you're in the virtual environment and have run `make` or `python setup.py build_ext --inplace`.
+*   **Cause:** Your active terminal session is likely outside of the specific virtual environment where the library was installed.
+*   **Solution:** Run `source venv/bin/activate` (or `venv\Scripts\activate` on Windows) before running your script.
 
 ### Issue: "ImportError: cannot import name 'pyforge_core'"
+*   **Cause:** The pre-compiled wheel binary architecture didn't match your specific environment, or a manual source compilation phase failed.
+*   **Solution:** Ensure your `pip` version is up to date by running `pip install --upgrade pip`. If you are developing from source code, confirm all system developer headers (like `libglfw3-dev`) are installed and run `make clean` before trying `make` again.
 
-**Solution:** The C extension failed to compile. Check that:
-- Development headers are installed: `python3-dev` (Linux) or Xcode Command Line Tools (macOS)
-- GLFW, GLEW, and OpenAL development libraries are installed
-- Try compiling manually: `python setup.py build_ext --inplace`
-
-### Issue: OpenGL/Graphics window won't open
-
-**Solution:** 
-- On Linux with remote sessions, ensure you have X11 or Wayland configured
-- On WSL2, enable WSL GUI support
-- Check that your GPU drivers are up to date
-
-### Issue: "OSError: libopenal.so.1 not found"
-
-**Solution:** Install OpenAL development libraries:
-```bash
-sudo apt-get install libopenal-dev  # Linux
-brew install openal-soft            # macOS
-```
-
-### Issue: Build fails on Windows
-
-**Solution:** 
-- Ensure Visual Studio Build Tools C++ workload is installed
-- Run the command prompt as Administrator
-- Try installing pre-built wheels if available
-
----
-
-## Next Steps
-
-After successful installation, check out:
-- **[Basic Game Tutorial](./Basic-Game-Tutorial)** — Learn to build your first game
-- **[Function Reference Guide](../README.md#-global-function-reference-guide)** — API documentation
-
-For additional help or issues, visit the [GitHub Issues](https://github.com/EliAndrewTebcherany/pyforge-engine/issues) page.
+### Issue: OpenGL / Graphics window fails to open
+*   **Cause:** Missing display drivers or running inside an environment lacking native display outputs (like standard headless servers).
+*   **Solution:** 
+    *   Ensure your local graphics card drivers are updated to the latest version.
+    *   If you are testing inside **WSL2 (Windows Subsystem for Linux)**, ensure you are utilizing WSLg (WSL 2 GUI support available on updated Windows builds).
