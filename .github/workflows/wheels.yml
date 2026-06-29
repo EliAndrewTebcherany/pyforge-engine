@@ -1,0 +1,60 @@
+name: Build and Publish Wheels
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers when you push a version tag like v0.2.0
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.22.0
+        env:
+          # Linux: Automatically downloads required headers inside the build docker
+          CIBW_BEFORE_ALL_LINUX: >
+            apt-get update && 
+            apt-get install -y libglfw3-dev libgl1-mesa-dev libopenal-dev
+
+          # macOS: Automatically downloads dependencies via Homebrew
+          CIBW_BEFORE_ALL_MACOS: brew install glfw openal-soft
+          CIBW_ENVIRONMENT_MACOS: >
+            CFLAGS="-I/opt/homebrew/include" 
+            LDFLAGS="-L/opt/homebrew/lib"
+
+          # Windows: Automatically downloads and links dependencies via vcpkg
+          CIBW_BEFORE_ALL_WINDOWS: vcpkg install glfw3:x64-windows openal-soft:x64-windows
+          CIBW_ENVIRONMENT_WINDOWS: >
+            CMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  publish:
+    name: Upload to PyPI
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Enables Trusted Publishing with PyPI
+    steps:
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: cibw-wheels-*
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
