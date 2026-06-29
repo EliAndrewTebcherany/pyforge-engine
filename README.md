@@ -1,7 +1,7 @@
 # 🛠️ pyforge-engine (v0.2.0)
 
 > [!WARNING]
-> **N.B. Known Limitation (v1.0.0 Stable Architecture Note):** 
+> **N.B. Known Limitation (v0.2.0 Stable Architecture Note):** 
 > The Vector Physics Module (`pyforge.phygroup`) is currently undergoing internal namespace optimization. Shape entity generations (`pyforge.shape()`) may temporarily pass un-wrapped primitive data buffers back to the execution subsystem, causing an `AttributeError: 'list' object has no attribute 'get_physics'` under specific configurations. 
 > 
 > **Workaround for Devs:** If you are testing or writing complex structural multi-body elastic collision sandboxes right now, manually declare an object or class wrapper wrapper over the returned shape matrices to explicitly pass `current_x`, `current_y`, `mass`, and `velocity` properties smoothly down to your local runner pipelines. This will be completely patched inside an upcoming automated cross-platform wheel distribution release.
