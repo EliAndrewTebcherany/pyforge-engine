@@ -2,9 +2,7 @@ from setuptools import setup, Extension, find_packages
 
 pyforge_backend = Extension(
     'pyforge.pyforge_core',
-    # Added your new effects compilation source file
     sources=['src/core.c', 'src/text.c', 'src/effects.c'], 
-    # Linked openal directly to hook native audio hardware pipelines
     libraries=['glfw', 'GL', 'openal', 'm'],
 )
 
@@ -14,4 +12,8 @@ setup(
     author="Eli Andrew Tebcherany",
     packages=find_packages(),
     ext_modules=[pyforge_backend],
+    # Automatically downloads Pillow so your users don't need local files
+    install_requires=[
+        "Pillow>=10.0.0"
+    ],
 )
