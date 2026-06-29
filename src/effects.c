@@ -53,35 +53,35 @@ PyObject* method_init_audio_hardware(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
 }
 
-// Low-level helper function to load standard 16-bit uncompressed WAV files [2]
 static int load_wav_file(const char* filename, ALuint buffer) {
     FILE* fp = fopen(filename, "rb");
     if (!fp) return 0;
 
     char chunk_id[4];
-    fread(chunk_id, 4, 1, fp); // Read "RIFF"
-    fseek(fp, 12, SEEK_SET);   // Skip to subchunk format descriptor
-    
+    // FIXED: Check return values of fread to satisfy GCC warning requirements!
+    if (fread(chunk_id, 4, 1, fp) != 1) { fclose(fp); return 0; }
     fseek(fp, 22, SEEK_SET);
+    
     short channels;
-    fread(&channels, 2, 1, fp); // 1 = Mono, 2 = Stereo
+    if (fread(&channels, 2, 1, fp) != 1) { fclose(fp); return 0; }
 
     int sample_rate;
-    fread(&sample_rate, 4, 1, fp);
+    if (fread(&sample_rate, 4, 1, fp) != 1) { fclose(fp); return 0; }
 
     fseek(fp, 34, SEEK_SET);
     short bits_per_sample;
-    fread(&bits_per_sample, 2, 1, fp); // 8 or 16 bits
+    if (fread(&bits_per_sample, 2, 1, fp) != 1) { fclose(fp); return 0; }
 
     fseek(fp, 40, SEEK_SET);
     int data_size;
-    fread(&data_size, 4, 1, fp); // Size of the raw PCM audio data payload
+    if (fread(&data_size, 4, 1, fp) != 1) { fclose(fp); return 0; }
 
     unsigned char* data = (unsigned char*)malloc(data_size);
-    fread(data, data_size, 1, fp);
+    if (!data) { fclose(fp); return 0; }
+    
+    if (fread(data, data_size, 1, fp) != 1) { free(data); fclose(fp); return 0; }
     fclose(fp);
 
-    // Auto-detect audio track formatting structure channels metrics [2]
     ALenum format = AL_FORMAT_MONO16;
     if (channels == 1 && bits_per_sample == 8) format = AL_FORMAT_MONO8;
     else if (channels == 1 && bits_per_sample == 16) format = AL_FORMAT_MONO16;
@@ -92,6 +92,7 @@ static int load_wav_file(const char* filename, ALuint buffer) {
     free(data);
     return 1;
 }
+
 
 // Pyforge.play_sound_file(filepath) - For short sound effect files like jumps/clicks
 PyObject* method_play_sound_file(PyObject* self, PyObject* args) {
