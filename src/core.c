@@ -1,265 +1,322 @@
-#define PY_SSIZE_T_CLEAN
+#define GL_GLEXT_PROTOTYPES
 #include <Python.h>
 #include <GLFW/glfw3.h>
-#include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <math.h>
 
-// Master window context pointer
-extern PyObject* method_load_font_sheet(PyObject* self, PyObject* args);
-extern PyObject* method_draw_text(PyObject* self, PyObject* args);
-extern PyObject* method_init_audio_hardware(PyObject* self, PyObject* args);
-extern PyObject* method_play_sound_file(PyObject* self, PyObject* args);      // Added
-extern PyObject* method_play_music_file(PyObject* self, PyObject* args);      // Added
-extern PyObject* method_spawn_burst_effect(PyObject* self, PyObject* args);
-extern PyObject* method_update_and_render_particles(PyObject* self, PyObject* args);
+#define MAX_INSTANCES 5000
 
-GLFWwindow* global_window = NULL;
+// --- GLOBAL ENGINE STATE MANAGER TRACKING CONTROLLER ---
+typedef struct {
+    GLFWwindow* window;
+    int screen_width;
+    int screen_height;
+    GLuint currently_bound_program;
+    GLuint currently_bound_vao;
+    bool is_initialized;
+    float total_time; // Tracks hardware run runtime ticks
+} EngineStateManager;
+
+static EngineStateManager EngineState = { NULL, 0, 0, 0, 0, false, 0.0f };
+
+// Global references for our Modern Hardware Buffer layout
+GLuint shape_vao = 0;
+GLuint base_vertex_vbo = 0;
+GLuint instance_data_vbo = 0;
+GLuint shader_program = 0;
+
+// Structural layout defining an object's transformations pushed directly to shaders
+typedef struct {
+    float x, y;
+    float size;
+    float base_angle;  // The initial static tilt angle
+    float rot_speed;   // Custom automatic spin velocity parameter!
+    float r, g, b;
+    float shape_type; 
+} ShapeInstance;
+
+static ShapeInstance instance_cache[MAX_INSTANCES];
+
+// --- CLEAN UN-GLITCHED VERTEX SHADER ---
+const char* vertex_shader_source = "#version 330 core\n"
+    "layout (location = 0) in vec2 aPos;\n"         // Template geometry points passed from VRAM
+    "layout (location = 1) in vec2 aOffset;\n"      // Unique Instance Position (x, y)
+    "layout (location = 2) in float aSize;\n"       // Unique Instance Size
+    "layout (location = 3) in vec2 aRotParams;\n"   // Packs: x = base_angle, y = rot_speed
+    "layout (location = 4) in vec3 aColor;\n"       // Unique Instance Color (r, g, b)
+    "layout (location = 5) in float aShapeType;\n"  // State Tracker: 0=Triangle, 1=Square, 2=Circle\n"
+    "\n"
+    "uniform float u_Time;\n"
+    "out vec3 FragColor;\n"
+    "\n"
+    "void main() {\n"
+    "    // Calculate dynamic angles on the fly based on runtime clocks!\n"
+    "    float currentAngle = aRotParams.x + (aRotParams.y * u_Time * 50.0);\n"
+    "    float angleRad = radians(currentAngle);\n"
+    "    \n"
+    "    float cosA = cos(angleRad);\n"
+    "    float sinA = sin(angleRad);\n"
+    "    vec2 rotatedPos = vec2(\n"
+    "        (aPos.x * cosA - aPos.y * sinA) * aSize,\n"
+    "        (aPos.x * sinA + aPos.y * cosA) * aSize\n"
+    "    );\n"
+    "    \n"
+    "    float absoluteX = rotatedPos.x + aOffset.x;\n"
+    "    float absoluteY = rotatedPos.y + aOffset.y;\n"
+    "    \n"
+    "    float normX = (absoluteX / 1024.0) * 2.0 - 1.0;\n"
+    "    float normY = 1.0 - (absoluteY / 768.0) * 2.0;\n"
+    "    \n"
+    "    gl_Position = vec4(normX, normY, 0.0, 1.0);\n"
+    "    FragColor = aColor;\n"
+    "}\n";
+
+const char* fragment_shader_source = "#version 330 core\n"
+    "in vec3 FragColor;\n"
+    "out vec4 color;\n"
+    "\n"
+    "void main() {\n"
+    "    color = vec4(FragColor, 1.0);\n"
+    "}\n";
 
 
-
-// 1. Pyforge.init(width, height, title)
-static PyObject* method_init(PyObject* self, PyObject* args) {
+    static PyObject* pyforge_core_init(PyObject* self, PyObject* args) {
     int width, height;
     const char* title;
     if (!PyArg_ParseTuple(args, "iis", &width, &height, &title)) return NULL;
+    if (EngineState.is_initialized) Py_RETURN_NONE;
+
     if (!glfwInit()) {
-        PyErr_SetString(PyExc_RuntimeError, "Could not initialize GLFW");
+        PyErr_SetString(PyExc_RuntimeError, "Fatal: Could not initialize GLFW.");
         return NULL;
     }
-    global_window = glfwCreateWindow(width, height, title, NULL, NULL);
-    if (!global_window) {
+
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+
+    EngineState.window = glfwCreateWindow(width, height, title, NULL, NULL);
+    if (!EngineState.window) {
         glfwTerminate();
-        PyErr_SetString(PyExc_RuntimeError, "Could not create GLFW window");
+        PyErr_SetString(PyExc_RuntimeError, "Fatal: Failed to create window.");
         return NULL;
     }
-    glfwMakeContextCurrent(global_window);
-    
-    // Configure an orthogonal 2D screen viewport (0,0 mapping to top-left corner)
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, width, height, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    Py_RETURN_NONE;
-}
 
-// 2. Pyforge.shape(sides)
-static PyObject* method_shape(PyObject* self, PyObject* args) {
-    int sides;
-    if (!PyArg_ParseTuple(args, "i", &sides)) return NULL;
-    if (sides < 3) {
-        PyErr_SetString(PyExc_ValueError, "Shape must have >= 3 sides");
-        return NULL;
-    }
-    PyObject* point_list = PyList_New(0);
-    double angle_step = (2.0 * M_PI) / sides;
-    for (int i = 0; i < sides; i++) {
-        double current_angle = i * angle_step;
-        PyObject* point_tuple = Py_BuildValue("(dd)", cos(current_angle), sin(current_angle));
-        PyList_Append(point_list, point_tuple);
-        Py_DECREF(point_tuple);
-    }
-    return point_list;
-}
-
-// 3. Pyforge.load_texture(raw_bytes, width, height)
-static PyObject* method_load_texture(PyObject* self, PyObject* args) {
-    const char* bytes;
-    Py_ssize_t len;
-    int width, height;
-    if (!PyArg_ParseTuple(args, "y#ii", &bytes, &len, &width, &height)) return NULL;
-
-    GLuint texture_id;
-    glGenTextures(1, &texture_id);
-    glBindTexture(GL_TEXTURE_2D, texture_id);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, bytes);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    return Py_BuildValue("i", texture_id);
-}
-
-// 4. Pyforge.drawshape(shape, x, y, radius, angle, r, g, b, opacity, texture_id)
-static PyObject* method_drawshape(PyObject* self, PyObject* args) {
-    PyObject* point_list;
-    double x, y, radius, angle;
-    float r, g, b, alpha;
-    int texture_id;
-
-    if (!PyArg_ParseTuple(args, "Oddddffffi", &point_list, &x, &y, &radius, &angle, &r, &g, &b, &alpha, &texture_id)) {
-        return NULL;
-    }
-    if (!global_window || glfwWindowShouldClose(global_window)) Py_RETURN_NONE;
-
+    glfwMakeContextCurrent(EngineState.window);
+    glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    if (texture_id > 0) {
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, texture_id);
-    }
-
-    glPushMatrix(); 
-    glTranslated(x, y, 0.0);
-    glRotated(angle, 0.0, 0.0, 1.0);
-    glColor4f(r, g, b, alpha);
     
-    glBegin(GL_POLYGON);
-    Py_ssize_t num_points = PyList_Size(point_list);
-    for (Py_ssize_t i = 0; i < num_points; i++) {
-        PyObject* point_tuple = PyList_GetItem(point_list, i);
-        double local_x, local_y;
-        if (!PyArg_ParseTuple(point_tuple, "dd", &local_x, &local_y)) {
-            glEnd();
-            glPopMatrix();
-            if (texture_id > 0) glDisable(GL_TEXTURE_2D);
-            glDisable(GL_BLEND);
-            return NULL;
-        }
+    glViewport(0, 0, width, height);
+    EngineState.screen_width = width;
+    EngineState.screen_height = height;
+    EngineState.is_initialized = true;
+    EngineState.total_time = 0.0f;
 
-        if (texture_id > 0) {
-            double u = (local_x + 1.0) * 0.5;
-            double v = (local_y + 1.0) * 0.5;
-            glTexCoord2d(u, v);
-        }
+    Py_RETURN_NONE;
+}
 
-        glVertex2d(local_x * radius, local_y * radius);
-    }
-    glEnd();
+static PyObject* pyforge_core_is_open(PyObject* self, PyObject* args) {
+    if (!EngineState.is_initialized || !EngineState.window) Py_RETURN_FALSE;
     
-    glPopMatrix(); 
-    if (texture_id > 0) glDisable(GL_TEXTURE_2D);
-    glDisable(GL_BLEND);
-    Py_RETURN_NONE;
-}
-
-// 5. Pyforge.draw_texture(texture_id, x, y, w, h, src_x, src_y, src_w, src_h, tex_w, tex_h)
-static PyObject* method_draw_texture(PyObject* self, PyObject* args) {
-    int texture_id;
-    double x, y, w, h;
-    double src_x, src_y, src_w, src_h;
-    double tex_w, tex_h;
-
-    if (!PyArg_ParseTuple(args, "idddddddddd", &texture_id, &x, &y, &w, &h, &src_x, &src_y, &src_w, &src_h, &tex_w, &tex_h)) return NULL;
-    if (!global_window) Py_RETURN_NONE;
-
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, texture_id);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    glBegin(GL_QUADS);
-        glTexCoord2d(src_x / tex_w, src_y / tex_h);
-        glVertex2d(x, y);
-
-        glTexCoord2d((src_x + src_w) / tex_w, src_y / tex_h);
-        glVertex2d(x + w, y);
-
-        glTexCoord2d((src_x + src_w) / tex_w, (src_y + src_h) / tex_h);
-        glVertex2d(x + w, y + h);
-
-        glTexCoord2d(src_x / tex_w, (src_y + src_h) / tex_h);
-        glVertex2d(x, y + h);
-    glEnd();
-
-    glDisable(GL_TEXTURE_2D);
-    glDisable(GL_BLEND);
-    Py_RETURN_NONE;
-}
-
-// 6. Pyforge.clear_gradient(r1, g1, b1, r2, g2, b2)
-static PyObject* method_clear_gradient(PyObject* self, PyObject* args) {
-    float r1, g1, b1, r2, g2, b2;
-    if (!PyArg_ParseTuple(args, "ffffff", &r1, &g1, &b1, &r2, &g2, &b2)) return NULL;
-    if (!global_window) Py_RETURN_NONE;
-    int w, h;
-    glfwGetWindowSize(global_window, &w, &h);
-    glBegin(GL_QUADS);
-        glColor3f(r1, g1, b1);   glVertex2d(0, 0);
-        glColor3f(r1, g1, b1);   glVertex2d(w, 0);
-        glColor3f(r2, g2, b2);   glVertex2d(w, h);
-        glColor3f(r2, g2, b2);   glVertex2d(0, h);
-    glEnd();
-    Py_RETURN_NONE;
-}
-
-// 7. Pyforge.is_key_pressed(key_id)
-static PyObject* method_is_key_pressed(PyObject* self, PyObject* args) {
-    int key_id;
-    if (!PyArg_ParseTuple(args, "i", &key_id)) return NULL;
-    if (!global_window) Py_RETURN_FALSE;
-    if (glfwGetKey(global_window, key_id) == GLFW_PRESS) Py_RETURN_TRUE;
-    Py_RETURN_FALSE;
-}
-
-// 8. Pyforge.is_open()
-static PyObject* method_is_open(PyObject* self, PyObject* args) {
-    if (global_window && !glfwWindowShouldClose(global_window)) {
-        glClear(GL_COLOR_BUFFER_BIT);
-        glfwPollEvents();
-        Py_RETURN_TRUE;
+    if (glfwWindowShouldClose(EngineState.window)) {
+        glfwDestroyWindow(EngineState.window);
+        glfwTerminate();
+        EngineState.window = NULL;
+        EngineState.is_initialized = false;
+        Py_RETURN_FALSE;
     }
-    Py_RETURN_FALSE;
+    
+    glfwPollEvents();
+    
+    // 🌟 FIXED: The macro handles the return statement implicitly!
+    Py_RETURN_TRUE; 
 }
 
-// 9. Pyforge.refresh()
-static PyObject* method_refresh(PyObject* self, PyObject* args) {
-    if (global_window) glfwSwapBuffers(global_window);
+static PyObject* pyforge_core_refresh(PyObject* self, PyObject* args) {
+    float dt;
+    if (!PyArg_ParseTuple(args, "f", &dt)) dt = 0.016f; // Standard frame tick fallback
+    
+    if (EngineState.window) {
+        EngineState.total_time += dt; // Accumulate time slice values natively
+        glfwSwapBuffers(EngineState.window);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
     Py_RETURN_NONE;
 }
 
-// 10. Pyforge.get_mouse_pos()
-static PyObject* method_get_mouse_pos(PyObject* self, PyObject* args) {
-    if (!global_window) {
-        return Py_BuildValue("(dd)", 0.0, 0.0);
-    }
-    double mx, my;
-    glfwGetCursorPos(global_window, &mx, &my);
-    return Py_BuildValue("(dd)", mx, my); 
+static PyObject* pyforge_core_set_vsync(PyObject* self, PyObject* args) {
+    int enabled;
+    if (!PyArg_ParseTuple(args, "i", &enabled)) return NULL;
+    glfwSwapInterval(enabled ? 1 : 0);
+    Py_RETURN_NONE;
 }
 
-// 11. Pyforge.is_mouse_pressed(button_id)
-static PyObject* method_is_mouse_pressed(PyObject* self, PyObject* args) {
-    int button_id;
-    if (!PyArg_ParseTuple(args, "i", &button_id)) return NULL;
-    if (!global_window) Py_RETURN_FALSE;
-    if (glfwGetMouseButton(global_window, button_id) == GLFW_PRESS) {
-        Py_RETURN_TRUE;
+static PyObject* pyforge_core_init_buffers(PyObject* self, PyObject* args) {
+    GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
+    glCompileShader(vertex_shader);
+
+    GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
+    glCompileShader(fragment_shader);
+
+    shader_program = glCreateProgram();
+    glAttachShader(shader_program, vertex_shader);
+    glAttachShader(shader_program, fragment_shader);
+    glLinkProgram(shader_program);
+
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+
+    // Allocate a combined vertex memory buffer for all shapes
+    // 3 vertices (Triangle) + 6 vertices (Square) + 96 vertices (32-sided Circle) = 105 vertices
+    float master_vertex_buffer[105 * 2];
+    int idx = 0;
+
+    // 🔺 1. Bake Triangle Geometry (3 Vertices)
+    master_vertex_buffer[idx++] =  0.0f;  master_vertex_buffer[idx++] =  0.5f;
+    master_vertex_buffer[idx++] = -0.5f; master_vertex_buffer[idx++] = -0.5f;
+    master_vertex_buffer[idx++] =  0.5f;  master_vertex_buffer[idx++] = -0.5f;
+
+    // 🟩 2. Bake Square Geometry (6 Vertices)
+    master_vertex_buffer[idx++] = -0.5f; master_vertex_buffer[idx++] =  0.5f;
+    master_vertex_buffer[idx++] = -0.5f; master_vertex_buffer[idx++] = -0.5f;
+    master_vertex_buffer[idx++] =  0.5f;  master_vertex_buffer[idx++] = -0.5f;
+    master_vertex_buffer[idx++] = -0.5f; master_vertex_buffer[idx++] =  0.5f;
+    master_vertex_buffer[idx++] =  0.5f;  master_vertex_buffer[idx++] = -0.5f;
+    master_vertex_buffer[idx++] =  0.5f;  master_vertex_buffer[idx++] =  0.5f;
+
+    // 🔵 3. Bake Circle Geometry (32 Triangles = 96 Vertices)
+    for (int i = 0; i < 32; i++) {
+        float angle1 = (float)i * (2.0f * M_PI / 32.0f);
+        float angle2 = (float)(i + 1) * (2.0f * M_PI / 32.0f);
+
+        // Center point of triangle fan
+        master_vertex_buffer[idx++] = 0.0f; master_vertex_buffer[idx++] = 0.0f;
+        // Outer point 1
+        master_vertex_buffer[idx++] = cosf(angle1) * 0.5f; master_vertex_buffer[idx++] = sinf(angle1) * 0.5f;
+        // Outer point 2
+        master_vertex_buffer[idx++] = cosf(angle2) * 0.5f; master_vertex_buffer[idx++] = sinf(angle2) * 0.5f;
     }
-    Py_RETURN_FALSE;
+
+    glGenVertexArrays(1, &shape_vao);
+    glGenBuffers(1, &base_vertex_vbo);
+    glGenBuffers(1, &instance_data_vbo);
+
+    glBindVertexArray(shape_vao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, base_vertex_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(master_vertex_buffer), master_vertex_buffer, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glBindBuffer(GL_ARRAY_BUFFER, instance_data_vbo);
+    glBufferData(GL_ARRAY_BUFFER, MAX_INSTANCES * sizeof(ShapeInstance), NULL, GL_STREAM_DRAW);
+
+    GLsizei stride = sizeof(ShapeInstance);
+
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(ShapeInstance, x));
+    glEnableVertexAttribArray(1);
+    glVertexAttribDivisor(1, 1); 
+
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(ShapeInstance, size));
+    glEnableVertexAttribArray(2);
+    glVertexAttribDivisor(2, 1);
+
+    glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(ShapeInstance, base_angle));
+    glEnableVertexAttribArray(3);
+    glVertexAttribDivisor(3, 1);
+
+    glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(ShapeInstance, r));
+    glEnableVertexAttribArray(4);
+    glVertexAttribDivisor(4, 1);
+
+    glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(ShapeInstance, shape_type));
+    glEnableVertexAttribArray(5);
+    glVertexAttribDivisor(5, 1);
+
+    glBindVertexArray(0);
+    Py_RETURN_NONE;
 }
 
-// Complete binding map table
-static PyMethodDef PyforgeMethods[] = {
-    {"init", method_init, METH_VARARGS, "Initializes viewport context configurations."},
-    {"shape", method_shape, METH_VARARGS, "Generates shape relative node layouts."},
-    {"load_texture", method_load_texture, METH_VARARGS, "Uploads raw image data allocations directly to VRAM."},
-    {"drawshape", method_drawshape, METH_VARARGS, "Renders vector structures using color paths or texture states."},
-    {"draw_texture", method_draw_texture, METH_VARARGS, "Slices and renders custom sheet coordinates."},
-    {"clear_gradient", method_clear_gradient, METH_VARARGS, "Fills background using two-color linear blending."},
-    {"is_key_pressed", method_is_key_pressed, METH_VARARGS, "Polls keyboard hardware clicks."},
-    {"get_mouse_pos", method_get_mouse_pos, METH_VARARGS, "Gets the current cursor (x, y) coordinates."},
-    {"is_mouse_pressed", method_is_mouse_pressed, METH_VARARGS, "Checks if a specific mouse button is held down."},
-    {"is_open", method_is_open, METH_VARARGS, "Tracks screen availability loop statuses."},
-    {"refresh", method_refresh, METH_VARARGS, "Flushes graphic pipelines output buffers."},
-    {"load_font_sheet", method_load_font_sheet, METH_VARARGS, "Compiles alpha glyph assets into VRAM font structures."},
-    {"draw_text", method_draw_text, METH_VARARGS, "Hardware textures true-type text strings via sprite sheet atlas mapping."},
-    {"init_audio_hardware", method_init_audio_hardware, METH_VARARGS, "Hooks sound cards components."},
-    {"play_sound_file", method_play_sound_file, METH_VARARGS, "Decodes and triggers short uncompressed local WAV sound effect track layers."},
-    {"play_music_file", method_play_music_file, METH_VARARGS, "Streams background ambient local WAV audio tracks with infinite looping parameters."},
-    {"spawn_burst_effect", method_spawn_burst_effect, METH_VARARGS, "Spawns visual geometric pixel explosion fragments."},
-    {"update_and_render_particles", method_update_and_render_particles, METH_VARARGS, "Updates simulation states maps matrices physics."},
+
+static PyObject* pyforge_core_draw_batch(PyObject* self, PyObject* args) {
+    PyObject* py_list;
+    if (!PyArg_ParseTuple(args, "O", &py_list)) return NULL;
+
+    Py_ssize_t count = PyList_Size(py_list);
+    if (count == 0) Py_RETURN_NONE;
+    if (count > MAX_INSTANCES) count = MAX_INSTANCES;
+
+    for (Py_ssize_t i = 0; i < count; i++) {
+        PyObject* item = PyList_GetItem(py_list, i);
+        double x, y, size, base_angle, rot_speed, r, g, b, shape_type;
+        
+        if (PyArg_ParseTuple(item, "ddddddddd", &x, &y, &size, &base_angle, &rot_speed, &r, &g, &b, &shape_type)) {
+            instance_cache[i].x = (float)x;
+            instance_cache[i].y = (float)y;
+            instance_cache[i].size = (float)size;
+            instance_cache[i].base_angle = (float)base_angle; 
+            instance_cache[i].rot_speed = (float)rot_speed;
+            instance_cache[i].r = (float)r;
+            instance_cache[i].g = (float)g;
+            instance_cache[i].b = (float)b;
+            instance_cache[i].shape_type = (float)shape_type;
+        }
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, instance_data_vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, count * sizeof(ShapeInstance), instance_cache);
+
+    glUseProgram(shader_program);
+    
+    GLint time_loc = glGetUniformLocation(shader_program, "u_Time");
+    glUniform1f(time_loc, EngineState.total_time);
+
+    glBindVertexArray(shape_vao);
+
+    // 🔒 STATE-AWARE LAYER BATCH ROUTING: Draw shapes using their exact VRAM index boundaries
+    for (Py_ssize_t i = 0; i < count; i++) {
+        // Point your hardware attribute data to this single element index
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(ShapeInstance), &instance_cache[i]);
+
+        if (instance_cache[i].shape_type < 0.5f) {
+            // Draw Triangle: Start vertex index 0, length 3 vertices
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+        } else if (instance_cache[i].shape_type < 1.5f) {
+            // Draw Square: Start vertex index 3, length 6 vertices
+            glDrawArrays(GL_TRIANGLES, 3, 6);
+        } else {
+            // Draw Circle: Start vertex index 9, length 96 vertices
+            glDrawArrays(GL_TRIANGLES, 9, 96);
+        }
+    }
+
+    glBindVertexArray(0);
+    Py_RETURN_NONE;
+}
 
 
-    {NULL, NULL, 0, NULL} 
+
+static PyMethodDef CoreMethods[] = {
+    {"init", pyforge_core_init, METH_VARARGS, ""},
+    {"is_open", pyforge_core_is_open, METH_NOARGS, ""},
+    {"refresh", pyforge_core_refresh, METH_VARARGS, ""}, // Switch to VARARGS to accept delta clocks
+    {"init_buffers", pyforge_core_init_buffers, METH_NOARGS, ""},
+    {"draw_batch", pyforge_core_draw_batch, METH_VARARGS, ""},
+    {"set_vsync", pyforge_core_set_vsync, METH_VARARGS, ""},
+    {NULL, NULL, 0, NULL}
 };
 
-// Module setup description
-static struct PyModuleDef pyforgemodule = {
-    PyModuleDef_HEAD_INIT, "pyforge_core", "High performance geometry core.", -1, PyforgeMethods
+static struct PyModuleDef pyforge_core_module = {
+    PyModuleDef_HEAD_INIT, "pyforge_core", "", -1, CoreMethods
 };
 
-// Execution initialization entry hook pointer
 PyMODINIT_FUNC PyInit_pyforge_core(void) {
-    return PyModule_Create(&pyforgemodule);
+    return PyModule_Create(&pyforge_core_module);
 }
